@@ -3,10 +3,11 @@ import streamlit as st
 from model import LEAGUES, estimate, backtest, metrics
 from data import download_results, download_fixtures
 from paper import render as render_paper
+from betfair import render as render_betfair
 
-st.set_page_config(page_title='GoalSense 2 | Goal Predictor', page_icon='⚽', layout='wide')
+st.set_page_config(page_title='GoalSense 3.2 | Goal Predictor', page_icon='⚽', layout='wide')
 st.markdown('''<style>.stApp{background:#0b1524;color:#edf3fa}div[data-testid="stMetric"]{background:#15283d;border:1px solid #29415a;border-radius:12px;padding:16px}</style>''', unsafe_allow_html=True)
-st.title('⚽ GoalSense 2')
+st.title('⚽ GoalSense 3.2')
 st.caption('European football • Over 0.5 total goals • Historical Poisson estimates • Walk-forward backtesting')
 
 with st.sidebar:
@@ -73,7 +74,7 @@ progress.empty()
 rank = pd.DataFrame(rankings)
 bt = pd.concat(bt_frames, ignore_index=True) if bt_frames else pd.DataFrame()
 
-tab1, tab2, tab3, tab4 = st.tabs(['📅 Upcoming rankings', '📊 Historical accuracy', 'ℹ️ Method and sources', '🧪 Paper betting'])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(['📅 Upcoming rankings', '📊 Historical accuracy', 'ℹ️ Method and sources', '🧪 Paper betting', '📡 Betfair odds'])
 with tab1:
     st.subheader('Upcoming matches ranked by probability of at least one goal')
     if rank.empty:
@@ -122,6 +123,9 @@ with tab3:
     st.markdown('''**Data:** Historical results are downloaded from `football-data.co.uk/mmz4281/{season}/{league}.csv`; upcoming fixtures from `football-data.co.uk/fixtures.csv`. Availability and coverage vary by league and season. No API key is required. The provider is independent of this app.\n\n**Model:** Shrunk, recent home-only and away-only attack/defence strengths are compared with league scoring averages to estimate expected goals for each team. Independent Poisson goal counts imply `P(at least one goal) = 1 − exp(−(home xG + away xG))`.\n\n**Limitations:** No injuries, starting XI, red cards, odds, match context, or live updates. League strength, promoted teams and schedule effects may reduce reliability. Fixture feeds can change or fail. No profit claims. Historical results do not guarantee future performance.\n\n**Backtest:** Chronological walk-forward predictions, with only matches dated earlier than the tested fixture available to the model. Brier score and calibration reveal whether predicted percentages resemble actual frequencies.''')
 with tab4:
     render_paper(rank)
+
+with tab5:
+    render_betfair()
 
 if notes:
     with st.expander(f'Download / coverage notes ({len(notes)})'):
