@@ -11,8 +11,8 @@ from model import estimate, backtest, clean_matches
 
 CUPS = {'UEFA Champions League': 2, 'UEFA Europa League': 3, 'UEFA Conference League': 848}
 API_URL = 'https://v3.football.api-sports.io/fixtures'
-GITHUB_API = 'https://api.github.com/repos/oladeeayo/open-matchday/git/trees/main?recursive=1'
-RAW_ROOT = 'https://raw.githubusercontent.com/oladeeayo/open-matchday/main/'
+GITHUB_API = 'https://api.github.com/repos/oladeeayo/open-matchday/git/trees/master?recursive=1'
+RAW_ROOT = 'https://raw.githubusercontent.com/oladeeayo/open-matchday/master/'
 FREE_HISTORY_SEASONS = (2022, 2023, 2024)
 
 SLUGS = {'UEFA Champions League': ('champions',), 'UEFA Europa League': ('europa',),
