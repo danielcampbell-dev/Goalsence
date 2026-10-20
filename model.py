@@ -15,7 +15,6 @@ LEAGUES = {
     'Scottish Premiership (Scotland)': 'SC0',
 }
 
-
 def clean_matches(df):
     required = ['Date', 'HomeTeam', 'AwayTeam', 'FTHG', 'FTAG']
     if not set(required).issubset(df.columns):
@@ -29,12 +28,8 @@ def clean_matches(df):
     d = d.sort_values(['Date', 'HomeTeam', 'AwayTeam']).reset_index(drop=True)
     return d
 
-
 def estimate(history, home, away, recent=12, shrink=6):
-    """Compute expected goals using home/away-specific attack and defence with prior shrinkage.
-
-    Historical matches supplied must be strictly before the target fixture date.
-    """
+    """Existing domestic-league estimator; only use pre-fixture history."""
     if len(history) < 20:
         return None
     h = history[history.HomeTeam.eq(home)].tail(recent)
@@ -54,8 +49,49 @@ def estimate(history, home, away, recent=12, shrink=6):
     return {'prob': 1 - math.exp(-(lam_h + lam_a)), 'home_xg': lam_h,
             'away_xg': lam_a, 'home_games': len(h), 'away_games': len(a)}
 
+def estimate_cup(history, home, away, recent=12, shrink=8, min_team_games=2):
+    """UEFA-only estimator using both home and away form when venue-specific data is sparse.
 
-def backtest(matches, recent=12, max_matches=450, min_history=100):
+    Never fabricates a team-specific probability when either team has no history.
+    All supplied history must predate the fixture.
+    """
+    if len(history) < 20:
+        return None
+    home_all = history[(history.HomeTeam == home) | (history.AwayTeam == home)].tail(recent)
+    away_all = history[(history.HomeTeam == away) | (history.AwayTeam == away)].tail(recent)
+    if len(home_all) < min_team_games or len(away_all) < min_team_games:
+        return None
+    hh = history[history.HomeTeam.eq(home)].tail(recent)
+    aa = history[history.AwayTeam.eq(away)].tail(recent)
+    lg_h = max(float(history.FTHG.mean()), .2)
+    lg_a = max(float(history.FTAG.mean()), .2)
+    league_avg = (lg_h + lg_a) / 2
+
+    def form(team_matches, team):
+        home_mask = team_matches.HomeTeam.eq(team)
+        scored = np.where(home_mask, team_matches.FTHG, team_matches.FTAG)
+        conceded = np.where(home_mask, team_matches.FTAG, team_matches.FTHG)
+        n = len(team_matches)
+        return ((float(scored.sum()) + shrink * league_avg) / (n + shrink) / league_avg,
+                (float(conceded.sum()) + shrink * league_avg) / (n + shrink) / league_avg)
+
+    h_attack, h_defence = form(home_all, home)
+    a_attack, a_defence = form(away_all, away)
+    lam_h = float(np.clip(lg_h * h_attack * a_defence, .15, 4.5))
+    lam_a = float(np.clip(lg_a * a_attack * h_defence, .15, 4.5))
+    venue_ready = len(hh) >= 3 and len(aa) >= 3
+    if venue_ready:
+        full = estimate(history, home, away, recent=recent)
+        if full:
+            full['method'] = 'venue-specific'
+            full['data_quality'] = 'higher'
+            return full
+    return {'prob': 1 - math.exp(-(lam_h + lam_a)), 'home_xg': lam_h,
+            'away_xg': lam_a, 'home_games': len(home_all),
+            'away_games': len(away_all), 'method': 'all-venue fallback',
+            'data_quality': 'medium' if min(len(home_all), len(away_all)) >= 6 else 'limited'}
+
+def backtest(matches, recent=12, max_matches=450, min_history=100, estimator=estimate):
     """Walk-forward: all inputs are from dates strictly before fixture date."""
     d = clean_matches(matches)
     out = []
@@ -68,13 +104,12 @@ def backtest(matches, recent=12, max_matches=450, min_history=100):
             continue
         today = d[d.Date == date]
         for _, row in today.iterrows():
-            p = estimate(past, row.HomeTeam, row.AwayTeam, recent=recent)
+            p = estimator(past, row.HomeTeam, row.AwayTeam, recent=recent)
             if p:
                 out.append({'Date': date, 'Home': row.HomeTeam, 'Away': row.AwayTeam,
                             'Probability': p['prob'], 'Actual': int(row.FTHG + row.FTAG > 0),
                             'Score': f'{int(row.FTHG)}–{int(row.FTAG)}'})
     return pd.DataFrame(out[-max_matches:])
-
 
 def metrics(bt):
     if bt.empty:
