@@ -4,15 +4,17 @@ from model import LEAGUES, estimate, backtest, metrics
 from data import download_results, download_fixtures
 from paper import render as render_paper
 from betfair import render as render_betfair
+from cups import CUPS, get_cup_predictions
 
 st.set_page_config(page_title='GoalSense 3.2 | Goal Predictor', page_icon='⚽', layout='wide')
 st.markdown('''<style>.stApp{background:#0b1524;color:#edf3fa}div[data-testid="stMetric"]{background:#15283d;border:1px solid #29415a;border-radius:12px;padding:16px}</style>''', unsafe_allow_html=True)
-st.title('⚽ GoalSense 3.2')
+st.title('⚽ GoalSense 3.3')
 st.caption('European football • Over 0.5 total goals • Historical Poisson estimates • Walk-forward backtesting')
 
 with st.sidebar:
     st.header('Settings')
-    chosen = st.multiselect('Leagues', list(LEAGUES), default=list(LEAGUES)[:5])
+    chosen = st.multiselect('Domestic leagues', list(LEAGUES), default=list(LEAGUES)[:5])
+    chosen_cups = st.multiselect('UEFA cup competitions', list(CUPS), default=[])
     seasons = st.slider('Historical seasons to download', 2, 7, 4)
     recent = st.slider('Recent home/away matches per team', 5, 25, 12)
     horizon = st.slider('Upcoming days', 3, 30, 14)
@@ -30,12 +32,12 @@ def fixtures(code):
 
 if refresh:
     results.clear(); fixtures.clear()
-if not chosen:
-    st.info('Choose at least one league in the sidebar.')
+if not chosen and not chosen_cups:
+    st.info('Choose at least one domestic league or UEFA competition in the sidebar.')
     st.stop()
 
 rankings, bt_frames, notes = [], [], []
-progress = st.progress(0, text='Downloading results and upcoming fixtures…')
+progress = st.progress(0, text='Downloading domestic results and upcoming fixtures…') if chosen else None
 for i, name in enumerate(chosen):
     code = LEAGUES[name]
     try:
@@ -69,7 +71,19 @@ for i, name in enumerate(chosen):
     except Exception as exc:
         notes.append(f'{name}: backtest unavailable — {exc}')
     progress.progress((i+1)/len(chosen))
-progress.empty()
+if progress is not None:
+    progress.empty()
+
+if chosen_cups:
+    cup_key = st.secrets.get("API_FOOTBALL_KEY", "")
+    if not cup_key:
+        notes.append("UEFA competitions: set API_FOOTBALL_KEY in Streamlit Secrets to enable fixtures and history. Your existing domestic leagues still work.")
+    else:
+        with st.spinner("Downloading UEFA competition data…"):
+            cup_rank, cup_bt, cup_notes = get_cup_predictions(chosen_cups, seasons, recent, horizon, max_test, cup_key)
+            rankings.extend(cup_rank)
+            bt_frames.extend(cup_bt)
+            notes.extend(cup_notes)
 
 rank = pd.DataFrame(rankings)
 bt = pd.concat(bt_frames, ignore_index=True) if bt_frames else pd.DataFrame()

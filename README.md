@@ -1,33 +1,22 @@
-# GoalSense 3.2 — Read-only Betfair odds + persistent private paper ledger
+# GoalSense 3.3 — UEFA club competitions
 
-This version retains the public predictions, historical backtesting, and Supabase-backed private paper ledger from GoalSense 3.1, and adds a **read-only Betfair odds tab**.
+Adds UEFA Champions League, Europa League and Conference League to the existing GoalSense 3.2 app. Keeps domestic competitions, Supabase paper ledger, and read-only Betfair tab.
 
-## Update your existing Streamlit site
-
-1. Extract this ZIP. Upload `app.py`, `betfair.py`, `paper.py`, `model.py`, `data.py`, `requirements.txt`, and `.streamlit/config.toml` to the same GitHub folder containing your deployed `app.py`. Commit the changes. **Do not upload secrets**.
-2. Keep your existing Supabase Streamlit Secrets (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PAPER_OWNER_EMAIL`) unchanged. Do not rerun the database schema: there are no database changes.
-3. In Streamlit Community Cloud > app > Settings > Secrets, optionally add:
+## Installation
+1. Extract this ZIP and upload the **contents** of `GoalSense_3_3` to the same GitHub directory as the existing `app.py`. Replace `app.py`, and add `cups.py`. Commit changes. Keep existing Supabase secrets and database; no schema migration.
+2. Register with API-Football (API-Sports) at https://www.api-football.com/ and check whether your plan covers the three UEFA competitions, historical seasons, and upcoming fixtures. Plan limits and availability vary. Obtain your API key.
+3. In Streamlit Community Cloud > app > Settings > Secrets, append this TOML setting to your existing settings:
 
 ```toml
-BETFAIR_APP_KEY = "YOUR_BETFAIR_APPLICATION_KEY"
-BETFAIR_SESSION_TOKEN = "YOUR_TEMPORARY_BETFAIR_SESSION_TOKEN"
+API_FOOTBALL_KEY = "YOUR_API_FOOTBALL_KEY"
 ```
 
-These credentials must be obtained through Betfair's developer API and approved authentication methods. Betfair API access, fees, and permissions depend on account status and current Betfair policies. A session token expires and must be refreshed or replaced. **Never share these credentials, commit them to GitHub, or paste your Betfair password into the app.**
-4. Reboot Streamlit if required. Check the new **Betfair odds** tab. The tab should show configuration guidance until valid credentials are provided.
+Never commit your key or `.streamlit/secrets.toml` to GitHub. Reboot if needed.
+4. Open GoalSense; use the **UEFA cup competitions** sidebar filter to select competitions. Select no domestic leagues to view UEFA only.
 
-## What it does
-
-- Queries Betfair Exchange **football (eventTypeId 1), OVER_UNDER_05** markets for up to 14 days ahead.
-- Retrieves the best currently available *back* offer for the **Over 0.5 Goals** selection.
-- Shows an odds snapshot and lets you export it as CSV.
-- Uses only Betfair's `listMarketCatalogue` and `listMarketBook` endpoints. **No `placeOrders`, betting execution, or account-funds endpoints are implemented.**
-- Keeps the existing private paper ledger and manual odds entry. This deliberately avoids unsafe automatic matching of Betfair events to football-data.co.uk fixture names.
-
-## Known limitations
-
-- **Not an automated value-betting engine yet.** Matching two providers' fixtures requires reliable event identifiers and validation of home/away, kickoff time, and market/selection. A name-only join can lead to incorrect matches.
-- Betfair odds retrieval requires the existing private Supabase owner login; public visitors cannot trigger the API calls. Never show tokens in the UI.
-- Odds may be delayed, stale, missing, or unavailable depending on key entitlements and liquidity. API throttling and Betfair terms apply.
-- Existing paper ledger settlement remains manual. The Supabase balance persists between restarts.
-- This app is a research/paper-trading prototype. Probabilities are not proven to be calibrated and there is no claim of betting profitability.
+## Notes
+- Data provider: API-Football `fixtures` endpoint; league IDs 2 (Champions League), 3 (Europa League), 848 (Conference League). Requires API key and plan coverage; **not** automatically available from football-data.co.uk domestic CSV feeds.
+- Uses historical UEFA match results within each competition for goal estimates, and walk-forward backtesting. A team needs at least three historical home or away games in that competition; insufficient-data fixtures are omitted rather than assigned invented probabilities. Cup-only historical samples can be sparse, especially for new entrants. No cross-league strength adjustment is applied.
+- 90-minute results are used for AET/PEN fixtures when available. Matches are labelled with UTC calendar dates; no real betting actions.
+- No automatic matching to Betfair odds, and no evidence of calibrated predictive accuracy is claimed. Paper bets remain simulated.
+- API-Football has rate limits; cache is 1 hour. Availability of the current season depends on provider updates.
