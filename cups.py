@@ -15,8 +15,11 @@ GITHUB_API = 'https://api.github.com/repos/oladeeayo/open-matchday/git/trees/mas
 RAW_ROOT = 'https://raw.githubusercontent.com/oladeeayo/open-matchday/master/'
 FREE_HISTORY_SEASONS = (2022, 2023, 2024)
 
-SLUGS = {'UEFA Champions League': ('champions',), 'UEFA Europa League': ('europa',),
-         'UEFA Conference League': ('conference',)}
+SLUGS = {
+    'UEFA Champions League': ('champions-league',),
+    'UEFA Europa League': ('europa-league',),
+    'UEFA Conference League': ('conference-league',),
+}
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_history(league_id, season, api_key):
