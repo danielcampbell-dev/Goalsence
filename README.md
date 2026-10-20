@@ -1,22 +1,25 @@
-# GoalSense 3.3 — UEFA club competitions
-
-Adds UEFA Champions League, Europa League and Conference League to the existing GoalSense 3.2 app. Keeps domestic competitions, Supabase paper ledger, and read-only Betfair tab.
+# GoalSense 3.4 — Hybrid UEFA data
 
 ## Installation
-1. Extract this ZIP and upload the **contents** of `GoalSense_3_3` to the same GitHub directory as the existing `app.py`. Replace `app.py`, and add `cups.py`. Commit changes. Keep existing Supabase secrets and database; no schema migration.
-2. Register with API-Football (API-Sports) at https://www.api-football.com/ and check whether your plan covers the three UEFA competitions, historical seasons, and upcoming fixtures. Plan limits and availability vary. Obtain your API key.
-3. In Streamlit Community Cloud > app > Settings > Secrets, append this TOML setting to your existing settings:
+Upload the individual files in this folder to the root of your existing GitHub GoalSense app repository (replace app.py and cups.py, retain paper.py, betfair.py, etc.). Keep your existing Streamlit Secrets and Supabase schema. No migration or Betfair changes.
 
-```toml
-API_FOOTBALL_KEY = "YOUR_API_FOOTBALL_KEY"
-```
+## Sources
+- Domestic leagues: unchanged football-data.co.uk feeds.
+- UEFA history: API-Football `fixtures` for past seasons allowed by `API_FOOTBALL_KEY`.
+- UEFA current fixtures and results: open-matchday public CSV repository, discovered through its GitHub public tree API, no new key required. https://github.com/oladeeayo/open-matchday
+- UEFA source updates are not live; the upstream project describes approximately daily/two-day refreshes. This integration is not verified against the live source from this environment. If CSV folder names, season naming or schema differ, open the GoalSense "Download / coverage notes" expander.
 
-Never commit your key or `.streamlit/secrets.toml` to GitHub. Reboot if needed.
-4. Open GoalSense; use the **UEFA cup competitions** sidebar filter to select competitions. Select no domestic leagues to view UEFA only.
+## Important limitations
+- This does NOT guarantee UEFA predictions: teams may have insufficient home/away history, and API-Football team names may not match the free source. The model deliberately omits such fixtures rather than invent probabilities. A follow-on step is explicit verified team-name alias mapping and optional domestic-to-European model training.
+- API-Football free plans may deny some/all historical seasons. Those errors are shown as coverage notes; free current CSV results may still work.
+- Public source may be delayed, change its paths, or have missing matches; validate its license/terms for your intended use. The app does not place real bets.
+- Refresh downloaded data clears both domestic and UEFA caches. GitHub's unauthenticated API has request limits; cached tree listing lasts 6 hours.
 
-## Notes
-- Data provider: API-Football `fixtures` endpoint; league IDs 2 (Champions League), 3 (Europa League), 848 (Conference League). Requires API key and plan coverage; **not** automatically available from football-data.co.uk domestic CSV feeds.
-- Uses historical UEFA match results within each competition for goal estimates, and walk-forward backtesting. A team needs at least three historical home or away games in that competition; insufficient-data fixtures are omitted rather than assigned invented probabilities. Cup-only historical samples can be sparse, especially for new entrants. No cross-league strength adjustment is applied.
-- 90-minute results are used for AET/PEN fixtures when available. Matches are labelled with UTC calendar dates; no real betting actions.
-- No automatic matching to Betfair odds, and no evidence of calibrated predictive accuracy is claimed. Paper bets remain simulated.
-- API-Football has rate limits; cache is 1 hour. Availability of the current season depends on provider updates.
+## Secrets
+Keep existing SUPABASE_URL, SUPABASE_ANON_KEY, PAPER_OWNER_EMAIL, and Betfair secrets. `API_FOOTBALL_KEY` is optional for current CSVs, required for API-Football historical requests.
+
+## Testing
+1. Select UEFA Champions League and unselect domestic leagues; expand Download / coverage notes.
+2. Repeat for Europa League and Conference League.
+3. If no predictions appear, check whether history was denied or names differed; a blank ranking is not proof fixtures are missing.
+4. Confirm Supabase paper betting and Betfair tabs still load; no credentials are stored in the ZIP.

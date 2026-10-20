@@ -6,9 +6,9 @@ from paper import render as render_paper
 from betfair import render as render_betfair
 from cups import CUPS, get_cup_predictions
 
-st.set_page_config(page_title='GoalSense 3.2 | Goal Predictor', page_icon='⚽', layout='wide')
+st.set_page_config(page_title='GoalSense 3.4 | Goal Predictor', page_icon='⚽', layout='wide')
 st.markdown('''<style>.stApp{background:#0b1524;color:#edf3fa}div[data-testid="stMetric"]{background:#15283d;border:1px solid #29415a;border-radius:12px;padding:16px}</style>''', unsafe_allow_html=True)
-st.title('⚽ GoalSense 3.3')
+st.title('⚽ GoalSense 3.4')
 st.caption('European football • Over 0.5 total goals • Historical Poisson estimates • Walk-forward backtesting')
 
 with st.sidebar:
@@ -32,6 +32,8 @@ def fixtures(code):
 
 if refresh:
     results.clear(); fixtures.clear()
+    from cups import fetch_history, discover_csv_paths, read_public_csv
+    fetch_history.clear(); discover_csv_paths.clear(); read_public_csv.clear()
 if not chosen and not chosen_cups:
     st.info('Choose at least one domestic league or UEFA competition in the sidebar.')
     st.stop()
@@ -76,14 +78,11 @@ if progress is not None:
 
 if chosen_cups:
     cup_key = st.secrets.get("API_FOOTBALL_KEY", "")
-    if not cup_key:
-        notes.append("UEFA competitions: set API_FOOTBALL_KEY in Streamlit Secrets to enable fixtures and history. Your existing domestic leagues still work.")
-    else:
-        with st.spinner("Downloading UEFA competition data…"):
-            cup_rank, cup_bt, cup_notes = get_cup_predictions(chosen_cups, seasons, recent, horizon, max_test, cup_key)
-            rankings.extend(cup_rank)
-            bt_frames.extend(cup_bt)
-            notes.extend(cup_notes)
+    with st.spinner("Downloading UEFA historical data and free current fixtures…"):
+        cup_rank, cup_bt, cup_notes = get_cup_predictions(chosen_cups, seasons, recent, horizon, max_test, cup_key)
+        rankings.extend(cup_rank)
+        bt_frames.extend(cup_bt)
+        notes.extend(cup_notes)
 
 rank = pd.DataFrame(rankings)
 bt = pd.concat(bt_frames, ignore_index=True) if bt_frames else pd.DataFrame()
@@ -91,6 +90,8 @@ bt = pd.concat(bt_frames, ignore_index=True) if bt_frames else pd.DataFrame()
 tab1, tab2, tab3, tab4, tab5 = st.tabs(['📅 Upcoming rankings', '📊 Historical accuracy', 'ℹ️ Method and sources', '🧪 Paper betting', '📡 Betfair odds'])
 with tab1:
     st.subheader('Upcoming matches ranked by probability of at least one goal')
+    if chosen_cups:
+        st.caption('UEFA fixtures: free Open Matchday CSV feed; historical UEFA results: API-Football where your plan allows. Only fixtures with sufficient matching history receive predictions.')
     if rank.empty:
         st.warning('No qualifying upcoming fixtures were returned. The public fixture feed may be empty, unavailable, or missing your selected leagues. Try a longer horizon or refresh.')
     else:
