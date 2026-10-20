@@ -13,6 +13,8 @@ CUPS = {'UEFA Champions League': 2, 'UEFA Europa League': 3, 'UEFA Conference Le
 API_URL = 'https://v3.football.api-sports.io/fixtures'
 GITHUB_API = 'https://api.github.com/repos/oladeeayo/open-matchday/git/trees/main?recursive=1'
 RAW_ROOT = 'https://raw.githubusercontent.com/oladeeayo/open-matchday/main/'
+FREE_HISTORY_SEASONS = (2022, 2023, 2024)
+
 SLUGS = {'UEFA Champions League': ('champions',), 'UEFA Europa League': ('europa',),
          'UEFA Conference League': ('conference',)}
 
@@ -64,6 +66,8 @@ def get_current_csvs(name, season):
                 p.lower().endswith(f'_{season_suffix}.csv')]
     # Never silently substitute another competition or season.
     result = {}
+    if not matching:
+        raise ValueError(f'No matching CSV paths for {name} {season}/{season+1}; repository returned {len(paths)} CSV files. Verify provider coverage and naming.')
     for kind in ('results', 'fixtures'):
         candidates = [p for p in matching if p.split('/')[-1].startswith(kind+'_')]
         if not candidates:
@@ -95,22 +99,33 @@ def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
     season = now.year if now.month >= 7 else now.year-1
     for name in selected:
         hist_rows, upcoming_rows = [], []
+        api_counts = {}
+        csv_counts = {}
         if api_key:
-            for y in range(season-seasons+1, season):
+            # The free API-Football account explicitly allows 2022-2024 only.
+            # 'seasons' controls how many of those permitted seasons to request.
+            for y in FREE_HISTORY_SEASONS[-max(1, min(int(seasons), len(FREE_HISTORY_SEASONS))):]:
                 try:
-                    hist_rows.extend(parse_api_history(fetch_history(CUPS[name],y,api_key)))
+                    parsed = parse_api_history(fetch_history(CUPS[name],y,api_key))
+                    api_counts[y] = len(parsed)
+                    hist_rows.extend(parsed)
                 except Exception as exc:
                     warnings.append(f'{name} historical {y}/{y+1}: {exc}')
         else:
             warnings.append(f'{name}: API_FOOTBALL_KEY not set; using only current free CSV data.')
         try:
             csvs = get_current_csvs(name, season)
-            hist_rows.extend(csv_rows(csvs['results'], True))
-            upcoming_rows.extend(csv_rows(csvs['fixtures'], False))
+            current_results = csv_rows(csvs['results'], True)
+            upcoming_rows = csv_rows(csvs['fixtures'], False)
+            hist_rows.extend(current_results)
+            csv_counts = {'results': len(current_results), 'fixtures': len(upcoming_rows)}
         except Exception as exc:
             warnings.append(f'{name} current free fixtures/results: {exc}')
+        warnings.append(f'{name} diagnostics: historical API matches by season={api_counts}; current CSV rows={csv_counts}; total historical rows={len(hist_rows)}; current fixture rows={len(upcoming_rows)}.')
+        in_window = [r for r in upcoming_rows if now <= r['Date'] <= now + pd.Timedelta(days=horizon)]
+        warnings.append(f'{name} diagnostics: {len(in_window)} fixtures in the next {horizon} days (including fixtures without model predictions).')
         if not hist_rows:
-            warnings.append(f'{name}: no usable historical results available.')
+            warnings.append(f'{name}: no usable historical results available; prediction rows cannot be calculated.')
             continue
         hist = clean_matches(pd.DataFrame(hist_rows)).drop_duplicates(['Date','HomeTeam','AwayTeam','FTHG','FTAG'])
         # Provider spellings can differ. Current-season team names are canonical for prediction.
@@ -133,6 +148,7 @@ def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
                 tests.append(bt)
         except Exception as exc:
             warnings.append(f'{name} backtest: {exc}')
+        warnings.append(f'{name} diagnostics: {sum(r["League"] == name for r in ranks)} predictions calculated.')
         if not any(r['League']==name for r in ranks):
             warnings.append(f'{name}: no qualifying predictions; sparse UEFA-only team history or differing provider team names. Fixtures may exist but are not assigned fabricated probabilities.')
     return ranks, tests, warnings
