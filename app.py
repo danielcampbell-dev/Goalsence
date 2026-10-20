@@ -6,7 +6,7 @@ from paper import render as render_paper
 from betfair import render as render_betfair
 from cups import CUPS, get_cup_predictions
 
-st.set_page_config(page_title='st.write("GOALSENSE DEPLOYMENT TEST — VERSION 3.5")GoalSense 3.4 | Goal Predictor', page_icon='⚽', layout='wide')
+st.set_page_config(page_title='st.write("GOALSENSE DEPLOYMENT TEST — VERSION 3.b5")GoalSense 3.4 | Goal Predictor', page_icon='⚽', layout='wide')
 st.markdown('''<style>.stApp{background:#0b1524;color:#edf3fa}div[data-testid="stMetric"]{background:#15283d;border:1px solid #29415a;border-radius:12px;padding:16px}</style>''', unsafe_allow_html=True)
 st.title('⚽ GoalSense 3.4')
 st.caption('European football • Over 0.5 total goals • Historical Poisson estimates • Walk-forward backtesting')
