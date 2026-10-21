@@ -131,10 +131,40 @@ def csv_rows(df, completed):
             continue
     return rows
 
+def estimate_cross_cup(history, home, away, recent=12):
+    """Conservative cross-UEFA fallback, strictly using pre-fixture results.
+
+    Requires two games for each team across UEFA competitions. A one-game
+    estimate is not sufficiently stable to publish as a team prediction.
+    """
+    p = estimate_cup(history, home, away, recent=recent)
+    if p:
+        p = dict(p)
+        p['method'] = 'cross-UEFA fallback'
+        p['data_quality'] = 'limited (cross-competition)'
+    return p
+
+
 def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
     ranks, tests, warnings = [], [], []
     now = pd.Timestamp.now(tz='UTC').tz_localize(None).normalize()
     season = now.year if now.month >= 7 else now.year - 1
+    # Pool UEFA histories only when Conference League needs a fallback.
+    # Cache/API functions ensure this does not duplicate downloads unnecessarily.
+    cross_rows = []
+    if 'UEFA Conference League' in selected:
+        for other in ('UEFA Champions League', 'UEFA Europa League'):
+            if api_key:
+                for y in FREE_HISTORY_SEASONS[-max(1, min(int(seasons), len(FREE_HISTORY_SEASONS))):]:
+                    try:
+                        cross_rows.extend(parse_api_history(fetch_history(CUPS[other], y, api_key)))
+                    except Exception as exc:
+                        warnings.append(f'{other} cross-UEFA fallback history {y}: {exc}')
+            try:
+                other_csvs = get_current_csvs(other, season)
+                cross_rows.extend(csv_rows(other_csvs['results'], True))
+            except Exception as exc:
+                warnings.append(f'{other} cross-UEFA fallback current results: {exc}')
     for name in selected:
         hist_rows, upcoming_rows = [], []
         api_counts, csv_counts = {}, {}
@@ -163,12 +193,21 @@ def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
             warnings.append(f'{name}: no usable historical results available; prediction rows cannot be calculated.')
             continue
         hist = clean_matches(pd.DataFrame(hist_rows)).drop_duplicates(['Date', 'HomeTeam', 'AwayTeam', 'FTHG', 'FTAG'])
-        missing, sparse, predicted = [], [], 0
+        cross_hist = hist
+        if name == 'UEFA Conference League' and cross_rows:
+            cross_hist = clean_matches(pd.DataFrame(hist_rows + cross_rows)).drop_duplicates(
+                ['Date', 'HomeTeam', 'AwayTeam', 'FTHG', 'FTAG'])
+        missing, sparse, predicted, cross_predicted = [], [], 0, 0
         for row in in_window:
             prior = hist[hist.Date < row['Date']]
             home_count = int(((prior.HomeTeam == row['HomeTeam']) | (prior.AwayTeam == row['HomeTeam'])).sum())
             away_count = int(((prior.HomeTeam == row['AwayTeam']) | (prior.AwayTeam == row['AwayTeam'])).sum())
             p = estimate_cup(prior, row['HomeTeam'], row['AwayTeam'], recent=recent)
+            if not p and name == 'UEFA Conference League':
+                cross_prior = cross_hist[cross_hist.Date < row['Date']]
+                p = estimate_cross_cup(cross_prior, row['HomeTeam'], row['AwayTeam'], recent=recent)
+                if p:
+                    cross_predicted += 1
             if not p:
                 detail = f"{row['DisplayHome']} vs {row['DisplayAway']} ({home_count}/{away_count} prior matches)"
                 (missing if min(home_count, away_count) == 0 else sparse).append(detail)
@@ -188,6 +227,8 @@ def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
         except Exception as exc:
             warnings.append(f'{name} backtest: {exc}')
         warnings.append(f'{name} diagnostics: {predicted}/{len(in_window)} predictions calculated; {len(missing)} fixtures with a team having no matching history; {len(sparse)} fixtures with insufficient history.')
+        if name == 'UEFA Conference League':
+            warnings.append(f'{name} diagnostics: {cross_predicted} additional predictions using cross-UEFA history; no one-match-only estimates published. Cross-UEFA fallback has not been separately backtested.')
         if missing:
             warnings.append(f'{name} unmatched teams (first 8): ' + '; '.join(missing[:8]))
         if sparse:
