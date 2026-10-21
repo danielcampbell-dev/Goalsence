@@ -67,6 +67,19 @@ TEAM_ALIASES = {
     'psv': 'psv eindhoven',
     'leverkusen': 'bayer leverkusen',
     'b monchengladbach': 'borussia monchengladbach',
+    'fc copenhagen': 'fc copenhagen',
+    'kobenhavn': 'fc copenhagen',
+    'fc kobenhavn': 'fc copenhagen',
+    'nordsjaelland': 'nordsjaelland',
+    'fc nordsjaelland': 'nordsjaelland',
+    'aarhus': 'aarhus',
+    'agf': 'aarhus',
+    'agf aarhus': 'aarhus',
+    'crvena zvezda': 'crvena zvezda',
+    'red star belgrade': 'crvena zvezda',
+    'getafe cf': 'getafe',
+    'fc lugano': 'lugano',
+    'lugano': 'lugano',
 }
 
 def canonical_team(name):
@@ -170,6 +183,64 @@ def estimate_cross_cup(history, home, away, recent=12):
 
 
 
+# Additional Football-Data leagues use one all-seasons CSV per country.
+# Keep them separate from UEFA fixture discovery and from the domestic rankings.
+EXTRA_DOMESTIC = {
+    'Denmark': 'DNK', 'Poland': 'POL',
+    'Romania': 'ROU', 'Switzerland': 'SWZ',
+}
+EXTRA_CSV_ROOT = 'https://www.football-data.co.uk/new/'
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def extra_domestic_results(country_code, seasons=3):
+    """Read completed results from the verified extra-league CSV schema.
+
+    Older seasons and other competitions are excluded; only top-flight rows
+    with dates within the requested recent-season window are retained.
+    """
+    from io import BytesIO
+    from data import season_codes
+    response = requests.get(EXTRA_CSV_ROOT + country_code + '.csv', timeout=25,
+                            headers={'User-Agent': 'GoalSense/3.4 (football research)'})
+    response.raise_for_status()
+    raw = pd.read_csv(BytesIO(response.content), encoding='cp1252',
+                      on_bad_lines='skip', low_memory=False)
+    raw.columns = raw.columns.astype(str).str.strip().str.lower()
+    needed = {'date', 'home', 'away', 'hg', 'ag'}
+    if not needed.issubset(raw.columns):
+        raise ValueError('Missing required extra-league columns: ' +
+                         ', '.join(sorted(needed - set(raw.columns))))
+    if 'league' in raw.columns:
+        # Only the country's first division: most feeds contain a single
+        # league, but reject mixed divisions rather than blending them.
+        divisions = raw['league'].dropna().astype(str).str.strip().unique()
+        if len(divisions) > 1:
+            # Select the most recent season's dominant league label.
+            latest = raw.loc[raw['date'].notna(), ['date', 'league']].copy()
+            latest['_date'] = pd.to_datetime(latest['date'], dayfirst=True, errors='coerce')
+            latest = latest.dropna(subset=['_date'])
+            if latest.empty:
+                raise ValueError('Cannot identify the primary league')
+            latest = latest.sort_values('_date').tail(100)
+            primary = latest['league'].astype(str).value_counts().index[0]
+            raw = raw[raw['league'].astype(str) == primary]
+    dates = pd.to_datetime(raw['date'], dayfirst=True, errors='coerce')
+    today = pd.Timestamp.now(tz='UTC').tz_localize(None).normalize()
+    start = pd.Timestamp(today.year - min(int(seasons), 3) - 1, 1, 1)
+    d = pd.DataFrame({
+        'Date': dates,
+        'HomeTeam': raw['home'].map(canonical_team),
+        'AwayTeam': raw['away'].map(canonical_team),
+        'FTHG': pd.to_numeric(raw['hg'], errors='coerce'),
+        'FTAG': pd.to_numeric(raw['ag'], errors='coerce'),
+        'DomesticLeague': country_code,
+    })
+    d = d.dropna(subset=['Date', 'HomeTeam', 'AwayTeam', 'FTHG', 'FTAG'])
+    d = d[(d.Date >= start) & (d.Date < today) &
+          (d.FTHG >= 0) & (d.FTAG >= 0) &
+          d.HomeTeam.ne('') & d.AwayTeam.ne('')]
+    return d.drop_duplicates(['Date', 'HomeTeam', 'AwayTeam', 'FTHG', 'FTAG'])
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def domestic_fallback_data(seasons):
     """Load supported domestic leagues, retaining competition boundaries."""
@@ -186,7 +257,19 @@ def domestic_fallback_data(seasons):
             frames.append(df)
         except Exception as exc:
             errors.append(f'{league}: {type(exc).__name__}')
-    return (pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(), errors)
+    for country, code in EXTRA_DOMESTIC.items():
+        try:
+            df = extra_domestic_results(code, seasons=seasons)
+            if df.empty:
+                errors.append(f'{country}: no recent completed results')
+            else:
+                frames.append(df)
+        except Exception as exc:
+            errors.append(f'{country}: {type(exc).__name__} loading extra-league CSV')
+    combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if not combined.empty:
+        combined = combined.sort_values('Date').reset_index(drop=True)
+    return combined, errors
 
 
 def estimate_domestic_fallback(uefa_prior, domestic, home, away, fixture_date, recent=12):
@@ -243,7 +326,7 @@ def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
     domestic = pd.DataFrame()
     if 'UEFA Conference League' in selected:
         domestic, domestic_errors = domestic_fallback_data(seasons)
-        warnings.append(f'Conference League domestic fallback: {len(domestic)} results from supported domestic leagues; {len(domestic_errors)} league download failures.')
+        warnings.append(f'Conference League domestic fallback: {len(domestic)} results from supported domestic leagues (including Denmark, Poland, Romania and Switzerland where available); {len(domestic_errors)} download or validation issues: {domestic_errors[:8]}.')
     if 'UEFA Conference League' in selected:
         for other in ('UEFA Champions League', 'UEFA Europa League'):
             if api_key:
