@@ -8,7 +8,8 @@ from urllib.parse import quote
 import pandas as pd
 import requests
 import streamlit as st
-from model import estimate_cup, backtest, clean_matches
+from model import estimate_cup, backtest, clean_matches, LEAGUES
+from data import download_results
 
 CUPS = {'UEFA Champions League': 2, 'UEFA Europa League': 3, 'UEFA Conference League': 848}
 API_URL = 'https://v3.football.api-sports.io/fixtures'
@@ -43,6 +44,29 @@ TEAM_ALIASES = {
     'atletico madrid': 'atletico madrid',
     'shakhtar donetsk': 'shakhtar donetsk',
     'shakhtar': 'shakhtar donetsk',
+    'brighton': 'brighton and hove albion',
+    'brighton and hove albion': 'brighton and hove albion',
+    'man city': 'manchester city',
+    'manchester city': 'manchester city',
+    'tottenham': 'tottenham hotspur',
+    'tottenham hotspur': 'tottenham hotspur',
+    'newcastle': 'newcastle united',
+    'newcastle united': 'newcastle united',
+    'west ham': 'west ham united',
+    'west ham united': 'west ham united',
+    'wolves': 'wolverhampton wanderers',
+    'wolverhampton': 'wolverhampton wanderers',
+    'wolverhampton wanderers': 'wolverhampton wanderers',
+    'ath madrid': 'atletico madrid',
+    'ath bilbao': 'athletic bilbao',
+    'athletic club': 'athletic bilbao',
+    'betis': 'real betis',
+    'sociedad': 'real sociedad',
+    'hearts': 'heart of midlothian',
+    'copenhagen': 'fc copenhagen',
+    'psv': 'psv eindhoven',
+    'leverkusen': 'bayer leverkusen',
+    'b monchengladbach': 'borussia monchengladbach',
 }
 
 def canonical_team(name):
@@ -145,6 +169,70 @@ def estimate_cross_cup(history, home, away, recent=12):
     return p
 
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def domestic_fallback_data(seasons):
+    """Load supported domestic leagues, retaining competition boundaries."""
+    frames, errors = [], []
+    for league, code in LEAGUES.items():
+        try:
+            df, _ = download_results(code, seasons=min(int(seasons), 3))
+            if df.empty:
+                continue
+            df = df.copy()
+            df['HomeTeam'] = df['HomeTeam'].map(canonical_team)
+            df['AwayTeam'] = df['AwayTeam'].map(canonical_team)
+            df['DomesticLeague'] = code
+            frames.append(df)
+        except Exception as exc:
+            errors.append(f'{league}: {type(exc).__name__}')
+    return (pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(), errors)
+
+
+def estimate_domestic_fallback(uefa_prior, domestic, home, away, fixture_date, recent=12):
+    """Experimental fallback using within-league relative team strengths.
+
+    All data is strictly earlier than fixture_date. Each team must have at
+    least 3 domestic games in a single league; never pool scoring baselines
+    from different domestic competitions.
+    """
+    import math
+    import numpy as np
+    if domestic.empty or len(uefa_prior) < 20:
+        return None
+    past = domestic[domestic.Date < fixture_date]
+    strengths = []
+    for team in (home, away):
+        team_rows = past[(past.HomeTeam == team) | (past.AwayTeam == team)]
+        if team_rows.empty:
+            return None
+        # Prefer the domestic competition with most available matches.
+        league = team_rows.DomesticLeague.value_counts().index[0]
+        league_rows = past[past.DomesticLeague == league]
+        games = team_rows[team_rows.DomesticLeague == league].tail(recent)
+        if len(games) < 3 or len(league_rows) < 20:
+            return None
+        is_home = games.HomeTeam.eq(team).to_numpy()
+        scored = np.where(is_home, games.FTHG, games.FTAG).astype(float)
+        conceded = np.where(is_home, games.FTAG, games.FTHG).astype(float)
+        average = max(float((league_rows.FTHG.mean() + league_rows.FTAG.mean()) / 2), .2)
+        shrink = 12
+        attack = (float(scored.sum()) + shrink * average) / (len(games) + shrink) / average
+        defence = (float(conceded.sum()) + shrink * average) / (len(games) + shrink) / average
+        strengths.append((attack, defence, len(games)))
+    (ha, hd, hn), (aa, ad, an) = strengths
+    # Anchor to UEFA scoring rates, not the domestic leagues' raw goal rates.
+    base_h = max(float(uefa_prior.FTHG.mean()), .2)
+    base_a = max(float(uefa_prior.FTAG.mean()), .2)
+    lam_h = float(np.clip(base_h * ha * ad, .15, 4.5))
+    lam_a = float(np.clip(base_a * aa * hd, .15, 4.5))
+    return {'prob': 1 - math.exp(-(lam_h + lam_a)),
+            'home_xg': lam_h, 'away_xg': lam_a,
+            'home_games': hn, 'away_games': an,
+            'method': 'experimental domestic-league fallback',
+            'data_quality': 'experimental / not backtested'}
+
+
 def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
     ranks, tests, warnings = [], [], []
     now = pd.Timestamp.now(tz='UTC').tz_localize(None).normalize()
@@ -152,6 +240,10 @@ def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
     # Pool UEFA histories only when Conference League needs a fallback.
     # Cache/API functions ensure this does not duplicate downloads unnecessarily.
     cross_rows = []
+    domestic = pd.DataFrame()
+    if 'UEFA Conference League' in selected:
+        domestic, domestic_errors = domestic_fallback_data(seasons)
+        warnings.append(f'Conference League domestic fallback: {len(domestic)} results from supported domestic leagues; {len(domestic_errors)} league download failures.')
     if 'UEFA Conference League' in selected:
         for other in ('UEFA Champions League', 'UEFA Europa League'):
             if api_key:
@@ -197,7 +289,7 @@ def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
         if name == 'UEFA Conference League' and cross_rows:
             cross_hist = clean_matches(pd.DataFrame(hist_rows + cross_rows)).drop_duplicates(
                 ['Date', 'HomeTeam', 'AwayTeam', 'FTHG', 'FTAG'])
-        missing, sparse, predicted, cross_predicted = [], [], 0, 0
+        missing, sparse, predicted, cross_predicted, domestic_predicted = [], [], 0, 0, 0
         for row in in_window:
             prior = hist[hist.Date < row['Date']]
             home_count = int(((prior.HomeTeam == row['HomeTeam']) | (prior.AwayTeam == row['HomeTeam'])).sum())
@@ -208,6 +300,10 @@ def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
                 p = estimate_cross_cup(cross_prior, row['HomeTeam'], row['AwayTeam'], recent=recent)
                 if p:
                     cross_predicted += 1
+                else:
+                    p = estimate_domestic_fallback(prior, domestic, row['HomeTeam'], row['AwayTeam'], row['Date'], recent=recent)
+                    if p:
+                        domestic_predicted += 1
             if not p:
                 detail = f"{row['DisplayHome']} vs {row['DisplayAway']} ({home_count}/{away_count} prior matches)"
                 (missing if min(home_count, away_count) == 0 else sparse).append(detail)
@@ -228,7 +324,7 @@ def get_cup_predictions(selected, seasons, recent, horizon, max_test, api_key):
             warnings.append(f'{name} backtest: {exc}')
         warnings.append(f'{name} diagnostics: {predicted}/{len(in_window)} predictions calculated; {len(missing)} fixtures with a team having no matching history; {len(sparse)} fixtures with insufficient history.')
         if name == 'UEFA Conference League':
-            warnings.append(f'{name} diagnostics: {cross_predicted} additional predictions using cross-UEFA history; no one-match-only estimates published. Cross-UEFA fallback has not been separately backtested.')
+            warnings.append(f'{name} diagnostics: {cross_predicted} cross-UEFA and {domestic_predicted} experimental domestic fallback predictions; fallback estimates are not separately backtested.')
         if missing:
             warnings.append(f'{name} unmatched teams (first 8): ' + '; '.join(missing[:8]))
         if sparse:
