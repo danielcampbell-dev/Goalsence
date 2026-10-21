@@ -16,9 +16,9 @@ GITHUB_API = 'https://api.github.com/repos/oladeeayo/open-matchday/git/trees/mas
 RAW_ROOT = 'https://raw.githubusercontent.com/oladeeayo/open-matchday/master/'
 FREE_HISTORY_SEASONS = (2022, 2023, 2024)
 SLUGS = {
-    'UEFA Champions League': ('champions-league',),
-    'UEFA Europa League': ('europa-league',),
-    'UEFA Conference League': ('conference-league',),
+    'UEFA Champions League': ('UEFA_1_champions-league',),
+    'UEFA Europa League': ('UEFA_1_europa-league',),
+    'UEFA Conference League': ('UEFA_1_conference-league',),
 }
 
 # Only known-equivalent names should be merged. Expand after reviewing diagnostics.
@@ -96,10 +96,10 @@ def get_current_csvs(name, season):
     paths = discover_csv_paths()
     season_suffix = f'{season % 100:02d}{(season+1) % 100:02d}'
     matching = [p for p in paths if p.lower().startswith('data/') and
-                any(p.lower().split('/')[1] == slug for slug in SLUGS[name]) and
+                any(p.lower().split('/')[1] == slug.lower() for slug in SLUGS[name]) and
                 p.lower().endswith(f'_{season_suffix}.csv')]
     if not matching:
-        raise ValueError(f'No matching CSV paths for {name} {season}/{season+1}; repository returned {len(paths)} CSV files.')
+        raise ValueError(f'No matching CSV paths for {name} {season}/{season+1}; repository returned {len(paths)} CSV files; UEFA folder candidates: {[p for p in paths if p.startswith('data/UEFA_')][:12]}.')
     result = {}
     for kind in ('results', 'fixtures'):
         candidates = [p for p in matching if p.split('/')[-1].lower().startswith(kind + '_')]
