@@ -5,6 +5,7 @@ from data import download_results, download_fixtures
 from paper import render as render_paper
 from betfair import render as render_betfair
 from cups import CUPS, get_cup_predictions
+from results_tracker import render as render_results_tracker
 
 st.set_page_config(page_title='GoalSense 3.4 | Goal Predictor', page_icon='⚽', layout='wide')
 st.markdown('''<style>.stApp{background:#0b1524;color:#edf3fa}div[data-testid="stMetric"]{background:#15283d;border:1px solid #29415a;border-radius:12px;padding:16px}</style>''', unsafe_allow_html=True)
@@ -38,13 +39,14 @@ if not chosen and not chosen_cups:
     st.info('Choose at least one domestic league or UEFA competition in the sidebar.')
     st.stop()
 
-rankings, bt_frames, notes = [], [], []
+rankings, bt_frames, notes, domestic_results = [], [], [], {}
 progress = st.progress(0, text='Downloading domestic results and upcoming fixtures…') if chosen else None
 for i, name in enumerate(chosen):
     code = LEAGUES[name]
     try:
         hist, warnings = results(code, seasons)
         for warning in warnings: notes.append(f'{name}: {warning}')
+        domestic_results[name] = hist
     except Exception as exc:
         notes.append(f'{name}: results unavailable — {exc}')
         progress.progress((i+1)/len(chosen))
@@ -87,7 +89,7 @@ if chosen_cups:
 rank = pd.DataFrame(rankings)
 bt = pd.concat(bt_frames, ignore_index=True) if bt_frames else pd.DataFrame()
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(['📅 Upcoming rankings', '📊 Historical accuracy', 'ℹ️ Method and sources', '🧪 Paper betting', '📡 Betfair odds'])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(['📅 Upcoming rankings', '📊 Historical accuracy', 'ℹ️ Method and sources', '🧪 Paper betting', '📡 Betfair odds', '🏁 Results Tracker'])
 with tab1:
     st.subheader('Upcoming matches ranked by probability of at least one goal')
     if chosen_cups:
@@ -141,6 +143,9 @@ with tab4:
 
 with tab5:
     render_betfair()
+
+with tab6:
+    render_results_tracker(rank, bt, domestic_results, st.secrets.get('API_FOOTBALL_KEY', ''))
 
 if notes:
     with st.expander(f'Download / coverage notes ({len(notes)})'):
